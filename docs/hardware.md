@@ -2,43 +2,51 @@
 
 ## Reference configuration
 
-The headline numbers (RTF 0.733 for a 28.25s clip) were measured on:
+The headline numbers were measured on three RTX 5090-class GPUs (32 GB VRAM
+each), one ComfyUI worker per GPU.
 
-| Component | Spec |
+| Component | Requirement |
 |---|---|
-| GPUs | 3 × RTX 5090-class (32 GB VRAM each) |
-| Host RAM | ≥ 96 GB total (weights staging + audio pipeline) |
-| Storage | ≥ 150 GB free, NVMe recommended (model weights ~90 GB) |
-| Network | Any LAN; workers are reached by plain HTTP |
+| GPU VRAM | ≥ 32 GB per worker for the reference profile |
+| Host RAM | ≥ 96 GB total (weight staging + audio pipeline) |
+| Disk | ≥ 150 GB free, NVMe recommended (weights ≈ 90 GB) |
+| Software | Linux, NVIDIA driver ≥ 560, CUDA ≥ 12.4, Python ≥ 3.10, ffmpeg + ffprobe |
+| Network | plain LAN; workers reached by HTTP only |
 
-The GPUs may live in one chassis or be spread across multiple machines — the
-pipeline does not care. Workers register by URL, so a single 3-GPU box and three
-1-GPU boxes are operationally identical.
+GPUs may share a chassis or be spread across machines — a worker is just a URL,
+the orchestrator does not care about physical topology.
+
+## Required weights
+
+Place these under the worker's models directory (names must match the profile):
+
+| Profile key | File |
+|---|---|
+| `unet` | `minimax_h3_ref2va_pruned_int8_convrot.safetensors` |
+| `lora` | `minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` |
+| `text_encoder` | `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` |
+| `video_vae` | `minimax_h3_video_vae_fp16.safetensors` |
+| `audio_vae` | `minimax_h3_audio_vae_fp32.safetensors` |
+
+Check the upstream MiniMax-H3 license before redistributing or deploying weights.
+
+## Required custom nodes
+
+The workflow uses these ComfyUI class types, provided by the MiniMax-H3 node pack:
+`MiniMaxH3ReferenceToVideo`, `MiniMaxH3ImageToVideo`, `MiniMaxH3SigmaShift`,
+`MiniMaxH3AddGuide`, `SaveVideo`, `CreateVideo`, `VAEDecodeAudio`, `AudioAdjustVolume`.
 
 ## Sizing rules
 
-- **VRAM:** MiniMax-H3 at 608×352 / 226 frames / 4 steps fits in 32 GB with room
-  for the audio stack. 24 GB cards are not supported for this profile.
-- **One worker per GPU.** Do not colocate two workers on one GPU; VRAM contention
-  turns throughput into a lottery.
-- **CPU:** unremarkable. Orchestration and audio muxing are not CPU-bound; any
-  modern 8-core CPU keeps up with three workers.
-- **Bandwidth between workers:** none required. Workers never talk to each other;
-  all coordination goes through the orchestrator's queue.
+- **One worker per GPU.** Two workers sharing a GPU contend on VRAM and turn
+  throughput into a lottery. `run_worker.sh` refuses to double-book a port.
+- **Warm models stay warm.** Model load is excluded from steady-state numbers;
+  workers are long-lived.
+- **CPU is unremarkable.** Orchestration, download, and transcode are not
+  CPU-bound; any modern 8-core keeps up with three workers.
+- **No worker-to-worker traffic.** All coordination goes through the orchestrator.
 
 ## Scaling
 
-Throughput scales ~linearly with worker count until the orchestrator's submission
-path saturates (not observed below 8 workers).
-
-| GPUs | Expected throughput (this workload) |
-|---|---|
-| 1 | ~1.5 min per 28.25s clip (single-worker, sequential batches) |
-| 3 | RTF 0.733 (reference measurement) |
-| N | Clip sharding keeps wall clock roughly constant; queue depth grows |
-
-## Single-GPU fallback
-
-The pipeline works on one GPU — the orchestrator simply serializes batch shards.
-Expect wall clock to scale with shard count. Everything else (workflow JSON,
-receipt contract, benchmark protocol) is unchanged.
+Throughput scales ~linearly with worker count for batch sharding. A single GPU
+works — the orchestrator serializes shards and wall clock scales with shard count.

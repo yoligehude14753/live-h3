@@ -1,9 +1,9 @@
 .venv/
-models/
 ComfyUI/
-config/orchestrator.env
+models/
+runtime/
+config/orchestrator.json
+benchmark_result.json
 __pycache__/
 *.pyc
 .DS_Store
-outputs/
-benchmark_result.json

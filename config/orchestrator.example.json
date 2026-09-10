@@ -1,0 +1,43 @@
+{
+  "runtime_root": "./runtime",
+  "deadline_seconds": 600,
+  "poll_interval_seconds": 0.2,
+  "profile": {
+    "source_width": 608,
+    "source_height": 352,
+    "delivery_width": 640,
+    "delivery_height": 360,
+    "native_fps": 24,
+    "fps": 20,
+    "num_frames": 226,
+    "duration_seconds": 11.3,
+    "num_inference_steps": 4,
+    "sampler": "euler",
+    "scheduler": "simple",
+    "audio_gain_db": 12,
+    "dialogue_gain_db": 12,
+    "text_encoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    "video_vae": "minimax_h3_video_vae_fp16.safetensors",
+    "audio_vae": "minimax_h3_audio_vae_fp32.safetensors",
+    "unet": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    "lora": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+    "shift_video": 12.0,
+    "shift_audio": 3.0,
+    "ref_image_size": "match",
+    "delivery_video_bitrate_kbps": 320,
+    "delivery_audio_bitrate_kbps": 64,
+    "delivery_gop_frames": 40,
+    "delivery_encoder_preset": "veryfast"
+  },
+  "workers": [
+    { "id": "worker-0", "url": "http://127.0.0.1:8188",
+      "health_timeout_seconds": 8, "submit_timeout_seconds": 15,
+      "history_read_timeout_seconds": 8 },
+    { "id": "worker-1", "url": "http://192.0.2.11:8188",
+      "health_timeout_seconds": 15, "submit_timeout_seconds": 60,
+      "history_read_timeout_seconds": 15 },
+    { "id": "worker-2", "url": "http://192.0.2.12:8188",
+      "health_timeout_seconds": 15, "submit_timeout_seconds": 60,
+      "history_read_timeout_seconds": 15 }
+  ]
+}

@@ -1,63 +1,56 @@
 # Benchmark protocol
 
-The numbers in the README are only meaningful under this protocol.
-If you report numbers from your own deployment, follow the same rules
-so results are comparable.
+These rules make the headline numbers comparable across machines. If you report
+numbers from your own deployment, follow them and publish the same fields.
 
 ## Workload
 
 | Parameter | Value |
 |---|---|
-| Model | MiniMax-H3 |
-| Resolution | 608×352 |
+| Model | MiniMax-H3 Ref2VA |
+| Resolution | 608×352 (source) → 640×360 (delivery) |
 | Frames | 226 |
-| Frame rate | 24 FPS (clip duration 28.25s with audio tail) |
-| Sampling steps | 4 |
+| Native frame rate | 24 FPS |
+| Sampling steps | 4 (euler / simple) |
 | Audio | native stereo |
-| Reference input | fixed across runs |
+| Batch | 3 clips in parallel, one per lane |
+
+**Output-duration convention.** A block of 3 parallel clips is reported as
+28.25s of output (`block_duration_seconds`). A single 226-frame clip at native
+24 FPS is 9.417s. The headline 20.70s / RTF 0.733 uses the 28.25s block
+convention (3 lanes producing in parallel). Single-clip RTF divides wall clock
+by 9.417s instead. Pick one convention and state it.
 
 ## Timing rules
 
-- **Start:** orchestrator dispatches the first shard (`t_submit`).
-- **End:** orchestrator holds terminal ComfyUI receipts for all shards
-  (`max(t_receipt)`).
-- **Excluded:** model loading, weight download, environment setup.
-  Workers are warmed up before timing starts.
-- **Warmup:** at least one full job must complete before any timed run.
-- **Validity:** a timed run counts only if the job completes successfully —
-  all shards rendered, audio present, output playable.
+- **Start:** orchestrator dispatches the batch (`t_submit`).
+- **End:** orchestrator holds terminal receipts for all clips (`max(t_receipt)`).
+- **Excluded:** model loading, weight download, environment setup — workers are
+  warmed before timing.
+- **Warmup:** at least one full batch must complete before any timed run.
+- **Validity:** a run counts only if every clip completes and passes the
+  delivery-envelope probe (H.264 video, AAC audio, exact frame count and fps).
 
 ## Reference measurement
 
-Three successful batches after warmup:
-
-| Run | Wall clock |
-|---|---|
-| 1 | 20.703 s |
-| 2 | 20.821 s |
-| 3 | 20.575 s |
-
-Median: **20.70 s** for 28.25 s of output → **RTF 0.733**
-(RTF = wall clock / output duration; < 1.0 means faster than real-time playback).
+Three successful batches after warmup: 20.703s / 20.821s / 20.575s.
+Median 20.70s for 28.25s of output → **RTF 0.733**.
 
 ## Reporting template
 
-When publishing your own numbers, include:
-
 1. GPU model and count.
-2. Full workload table (resolution / frames / steps / audio).
-3. Warmup statement ("N jobs completed before timing").
-4. All individual run times, not just the best.
-5. The exact timing contract (submission → terminal receipt; loading excluded).
+2. Full workload table (resolution / frames / fps / steps / audio).
+3. The duration convention (single-clip vs parallel-block).
+4. Warmup statement.
+5. All individual run times, not just the best.
+6. The timing contract (submission → terminal receipt; loading excluded).
 
-Numbers without these five items are marketing, not benchmarks.
+Numbers without these six items are marketing, not benchmarks.
 
 ## Reproducing
 
 ```bash
-# workers running and warmed (see deploy/README.md)
-./deploy/benchmark.sh --runs 3 --config config/orchestrator.env
+python3 deploy/benchmark.py --config config/orchestrator.json --runs 3
 ```
 
-The script prints per-run wall clock, per-shard receipt times, and the
-resulting RTF, plus a machine-readable `benchmark_result.json`.
+Prints per-run wall clock and RTF, plus `benchmark_result.json` with the median.

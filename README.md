@@ -1,13 +1,12 @@
 # Ref2VA Consumer GPU Deployment
 
-Deployment notes and benchmark protocol for running a Ref2VA (Reference-to-Video/Audio)
-pipeline with **MiniMax-H3** on consumer-class GPUs.
+Deployment and benchmark tooling for running **MiniMax-H3 Ref2VA**
+(reference-to-video/audio) on consumer-class GPUs. One ComfyUI worker per GPU,
+a queue in front, and a benchmark protocol that times *submission → terminal
+receipt* with model loading excluded.
 
-This repository contains **deployment material only**: hardware requirements, worker
-layout, environment setup, and the benchmark methodology behind the numbers below.
-It does **not** contain any product, content, or business logic.
-
-## The headline
+This repo is **deployment-only**: no story, voting, or scheduling logic — just
+workers, an orchestrator, and a reproducible benchmark.
 
 > Three RTX 5090-class GPUs. 28.25 seconds of MiniMax-H3 video. 20.70 seconds wall clock.
 >
@@ -15,46 +14,56 @@ It does **not** contain any product, content, or business logic.
 >
 > Not a datacenter flex. Just three consumer-class GPUs running Ref2VA workers in parallel.
 
-**Output spec:** 608×352 · 226 frames · 24 FPS · 4 steps · native stereo audio.
+**Workload:** 608×352 · 226 frames · 24 FPS · 4 steps · native stereo audio.
+**Measurement:** three successful batches after warmup — 20.703s / 20.821s / 20.575s,
+submission → terminal ComfyUI receipt; model loading and download excluded.
 
-**Measurement:** three successful batches after warmup — 20.703s / 20.821s / 20.575s.
-Measured from submission to terminal ComfyUI receipt; model loading and download excluded.
-
-## What's in this repo
+## Layout
 
 | Path | Content |
 |---|---|
-| `docs/hardware.md` | GPU / host requirements and how to size the fleet |
-| `docs/architecture.md` | Worker layout, queue model, and failure semantics |
-| `docs/benchmark.md` | Exact benchmark protocol so the numbers are reproducible |
-| `docs/faq.md` | Common questions (precision, scaling, single-GPU fallback) |
-| `deploy/` | Generic install scripts and environment templates |
-| `config/` | Worker configuration templates |
-
-## Design principles
-
-1. **One GPU, one worker.** No model sharing across processes; each ComfyUI worker
-   owns a full GPU. Parallelism comes from the queue, not from tensor splitting.
-2. **Everything addressable is an IP:port.** Workers register by URL; nothing in the
-   config depends on where a machine physically lives.
-3. **Warm models stay warm.** Model load time is excluded from the benchmark and from
-   steady-state throughput planning. Workers are long-lived processes.
-4. **The receipt is the contract.** A job is done when the orchestrator receives the
-   terminal receipt from ComfyUI — not when the last frame is rendered.
+| `src/ref2va_deploy/worker_client.py` | ComfyUI HTTP/WS client: submit, poll, upload, result parse |
+| `src/ref2va_deploy/orchestrator.py` | Three-lane orchestrator + Ref2VA workflow builder |
+| `deploy/setup_worker.sh` | Install ComfyUI + deps on a GPU host |
+| `deploy/run_worker.sh` | Start one worker pinned to one GPU |
+| `deploy/benchmark.py` | The benchmark protocol (warmup + N timed runs → RTF) |
+| `config/orchestrator.example.json` | Full media profile + worker list |
+| `docs/hardware.md` | GPU/host sizing |
+| `docs/benchmark.md` | Exact timing contract |
+| `docs/parameter-matrix.md` | Video-parameter configurations and their effects |
+| `docs/reproduction.md` | Step-by-step third-party reproduction |
 
 ## Quick start
 
-See `deploy/README.md` for the full walkthrough. In short:
-
 ```bash
-# on each GPU host
-./deploy/setup_worker.sh            # installs deps, downloads MiniMax-H3 weights
-./deploy/run_worker.sh --gpu 0      # one worker per GPU
+# each GPU host
+./deploy/setup_worker.sh
+./deploy/run_worker.sh --gpu 0 --port 8188
 
-# on the orchestrator host
-cp config/orchestrator.env.example config/orchestrator.env
-# edit: list worker URLs, one per GPU
-./deploy/run_orchestrator.sh
+# orchestrator host
+cp config/orchestrator.example.json config/orchestrator.json   # edit worker URLs
+python3 deploy/benchmark.py --config config/orchestrator.json --runs 3
 ```
 
-Then benchmark with the protocol in `docs/benchmark.md`.
+See `docs/reproduction.md` for the full walkthrough.
+
+## Timing contract
+
+Wall clock = submission of the batch → terminal receipt of the last clip.
+RTF = wall / output duration. A run counts only if every clip completes with a
+valid H.264/AAC delivery envelope. Full rules in `docs/benchmark.md`.
+
+## Production telemetry
+
+Beyond the headline benchmark, the same profile has run continuously in
+production. Across **491 blocks** (3 parallel clips each, 28.25s output):
+
+| Metric | generation_seconds | block RTF |
+|---|---|---|
+| min | 10.63 | 0.231 |
+| p50 | 32.62 | 0.923 |
+| p95 | 64.56 | 1.722 |
+
+Best-observed single-block wall clock is 10.63s for 28.25s of output (RTF 0.231).
+The p50 sits just under real-time; the tail reflects worker stalls and cold
+lanes, not steady-state throughput. See `docs/parameter-matrix.md`.

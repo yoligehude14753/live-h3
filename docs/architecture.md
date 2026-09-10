@@ -1,72 +1,59 @@
 # Architecture
 
-## Overview
-
 ```
             ┌────────────────────┐
             │    Orchestrator    │
             │  (queue + submit)  │
             └─────────┬──────────┘
-              HTTP    │    HTTP (receipt webhook)
+              HTTP    │    HTTP (receipt)
       ┌───────────────┼───────────────┐
       ▼               ▼               ▼
 ┌───────────┐   ┌───────────┐   ┌───────────┐
-│ Worker A  │   │ Worker B  │   │ Worker C  │
+│ Worker 0  │   │ Worker 1  │   │ Worker 2  │
 │ ComfyUI   │   │ ComfyUI   │   │ ComfyUI   │
 │ GPU 0     │   │ GPU 1     │   │ GPU 2     │
 └───────────┘   └───────────┘   └───────────┘
 ```
 
-Deliberately boring: a queue in front of N independent ComfyUI instances.
-No shared filesystem requirement, no worker-to-worker traffic, no service
-discovery — workers are configured as a static list of URLs.
+A queue in front of N independent ComfyUI instances. No shared filesystem, no
+worker-to-worker traffic, no service discovery — workers are a static list of
+URLs.
 
-## Components
+## Orchestrator
 
-### Orchestrator
+- Owns the job and the worker registry (`config/orchestrator.json`).
+- Shards a batch across idle workers, submits each clip via `POST /prompt`,
+  and polls `/history/<prompt_id>` until terminal.
+- Downloads the MP4, probes the envelope (frame count, fps, codec), transcodes
+  to the delivery format, and writes a receipt.
 
-- Owns the job queue and the worker registry (`config/orchestrator.env`).
-- Splits a job into per-worker batch shards and submits via the ComfyUI
-  HTTP API (`POST /prompt`).
-- Collects terminal receipts (websocket or polling on `/history`) and
-  declares the job complete when all shards have terminal receipts.
-- Stateless apart from the in-flight queue; safe to restart mid-job
-  (in-flight shards are re-queued).
+## Worker
 
-### Worker
-
-- A stock ComfyUI instance pinned to one GPU (`CUDA_VISIBLE_DEVICES`).
-- Loads MiniMax-H3 weights once at startup and keeps them resident.
-- Exposes only the standard ComfyUI API. No custom plugins are required
-  beyond the model's custom nodes.
+- Stock ComfyUI pinned to one GPU, weights resident.
+- Exposes only the standard ComfyUI API plus the MiniMax-H3 node pack.
 - Knows nothing about the other workers.
+
+## Concurrency and deadlock avoidance
+
+A lane waits on its clip's **Future with the remaining deadline**, never on a
+bare `Event` for the clip to report "submitted". If a clip thread raises, the
+exception propagates to the batch immediately; the batch fails or retries
+instead of a lane blocking until the deadline while its clip thread is already
+gone. This is the failure mode the orchestrator is designed to avoid: a crashed
+clip must never look like a slow clip.
 
 ## Job lifecycle
 
-1. **Submit** — orchestrator accepts a job (reference input + params).
-2. **Shard** — the frame range is split into contiguous shards, one per idle worker.
-3. **Dispatch** — each shard becomes one ComfyUI prompt; `t_submit` is recorded.
-4. **Execute** — workers render independently.
-5. **Receipt** — orchestrator receives the terminal receipt per shard;
-   `t_receipt` is recorded per shard.
-6. **Assemble** — shard outputs are concatenated in frame order; audio is
-   muxed from the native stereo track.
-7. **Done** — wall clock for the benchmark is `max(t_receipt) - min(t_submit)`.
+1. **Wait idle** — all workers report empty run/pending queues.
+2. **Upload** — reference images/audio/first/last frames, cached per worker.
+3. **Dispatch** — one workflow per clip, `t_submit` recorded.
+4. **Poll** — `/history` until terminal success/error per clip.
+5. **Download + validate** — MP4 fetched, envelope probed, retried up to 3×.
+6. **Transcode** — to delivery H.264/AAC at the delivery fps.
+7. **Receipt** — wall clock, per-clip execution seconds, RTF.
 
 ## Failure semantics
 
-- **Worker dies mid-shard:** the shard times out, is re-queued to a healthy
-  worker. The job slows down; it does not fail.
-- **Orchestrator dies:** workers finish their shards into the void; on restart
-  the orchestrator re-queues everything that lacked a terminal receipt.
-  Duplicate receipts are deduplicated by prompt ID.
-- **Bad output (OOM, NaN frames):** the shard is marked failed, not retried
-  blindly — three failures of the same shard fails the job.
-
-## What this design explicitly avoids
-
-- Tensor parallelism / model sharding across GPUs (latency win is real but
-  the ops cost is not worth it at this scale).
-- A shared model server. Each worker owns its weights; there is nothing to
-  coordinate.
-- Any dependence on machine identity. A worker is a URL.
+- Clip raises → batch fails fast with the error; the lane does not hang.
+- Download/validation fails → retried up to 3 times, then raised.
+- Deadline exceeded anywhere → `TimeoutError`, batch fails.
