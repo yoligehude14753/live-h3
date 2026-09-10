@@ -1,9 +1,9 @@
 # Parameter matrix
 
 How the video parameters map to quality, speed, and hardware needs. The
-reference profile is the validated configuration; the other rows are supported
-levers and their expected effect. Treat non-reference rows as starting points —
-re-benchmark on your own hardware before quoting numbers.
+reference profile is the validated configuration. Measured rows are labeled
+with their data provenance; rows without a measured value are levers and their
+expected effect, not measurements.
 
 ## The levers
 
@@ -16,10 +16,71 @@ re-benchmark on your own hardware before quoting numbers.
 | Sampler / scheduler | `sampler` / `scheduler` | convergence behavior |
 | Shift | `shift_video` / `shift_audio` | temporal vs detail emphasis |
 | References | image / audio / first / last frame | identity & continuity vs prompt adherence |
+| Input mode | text-to-video / image-to-video / reference | conditioning path |
 
-## Configurations
+## Measured configuration tiers
 
-### Reference (validated) — 360p, 4-step turbo
+All rows below are real measurements from the deployment fleet, with their
+provenance. Where a tier was never measured, that is stated — no number is
+extrapolated or invented.
+
+### Resolution / duration tiers (single GPU unless noted)
+
+| Tier | Resolution | Frames / fps | Steps | Precision | Duration | Time | Provenance |
+|---|---|---|---|---|---|---|---|
+| 360p turbo | 608×352 | 124 / 24 | 4 | int8 + turbo LoRA | 5.167 s | exec 9.31–9.46 s, submit→receipt 10.16–10.31 s | sample-run receipts |
+| 768p short-drama | 768×1344 | 360 / 24 | 30 | fl2va | 15.0 s | submit→complete 1614–1956 s (median 1945 s) | production queue ledger, 13 shots |
+| 768p full | 1344×768 | 120 / 24 | 50 | bf16 (unoptimized) | 5.0 s | denoise 461.9 s (49 steps) | early validation record |
+| 1080p | — | — | — | — | — | **never measured** | — |
+
+Reading the tiers:
+
+- **360p turbo** is the only tier that runs faster than real-time. 5.167s of
+  output in ~9.3s of execution (~10.2s submit→receipt) on one card — already
+  near real-time on a single GPU, which is why three lanes in parallel break
+  RTF 1.0 (see the headline benchmark).
+- **768p short-drama** is the high-quality production tier: 30 steps, 15s
+  vertical clips, ~27–33 minutes per shot on a single card (RTF ≈ 130). This is
+  offline/batch work, not real-time — quality over speed.
+- **768p full bf16 at 50 steps** is the unoptimized baseline from early
+  validation (~462s denoise for 5s), shown for contrast against what the
+  turbo LoRA + int8 path achieves at 360p.
+- **1080p was never run.** Do not quote a number for it.
+
+The 360p→768p gap illustrates the super-linear resolution cost: 768×1344 has
+~4.8× the pixels of 608×352, and at higher steps the per-shot time goes from
+~10s to ~1900s — resolution and steps compound, they do not add.
+
+### Input mode at 360p (text vs image vs reference)
+
+At the reference 360p profile the conditioning path (text-to-video,
+image-to-video, or one reference image) does not measurably change sampling
+time — the reference/sample runs all land in the same ~9.3–9.5s execution band
+for 5.167s of output. Conditioning overhead is negligible next to sampling, so
+references are used freely for continuity. Resolution and steps, not input
+mode, are what move the clock.
+
+### Frame-count sweep (608×352, 24fps, 4-step turbo, single GPU)
+
+Two runs per tier; block RTF is the two-worker worst case. Source: production
+experiment ledger.
+
+| Frames | Clip length | Run 1 | Run 2 | Block RTF |
+|---|---|---|---|---|
+| 124 | 5.167 s | 8.898 s | 8.039 s | 0.861 |
+| 141 | 5.875 s | 10.259 s | 9.383 s | 0.873 |
+| 158 | 6.583 s | 11.668 s | 10.827 s | 0.886 |
+| 175 | 7.292 s | 13.210 s | 12.318 s | 0.906 |
+| 192 | 8.000 s | 14.670 s | 13.684 s | 0.917 |
+| 209 | 8.708 s | 16.311 s | 15.413 s | 0.936 |
+| 243 | 10.125 s | 19.700 s | 18.774 s | 0.973 / 0.927 |
+
+Execution grows ~linearly with frames (~0.075 s/frame at this profile); RTF
+degrades slowly since output duration grows in step. 243 frames passes RTF < 1
+with under 3% margin — not chosen for production. 226 frames / 9.417s is the
+selected operating point.
+
+## Reference profile (validated) — 360p, 4-step turbo
 
 | Field | Value |
 |---|---|
@@ -32,60 +93,21 @@ re-benchmark on your own hardware before quoting numbers.
 | VRAM | fits 32 GB |
 | Measured | RTF 0.733 (3-lane block, 28.25s out); best block RTF 0.231 |
 
-This is the only configuration with published measurements. The 4-step turbo
-LoRA is what makes RTF < 1 possible; the pruned int8 UNet is what makes it fit
-on a consumer card.
-
-### Higher quality — 8–12 steps
-
-| Change | Effect |
-|---|---|
-| `num_inference_steps: 8–12` | finer detail, fewer artifacts at motion boundaries |
-| wall clock | scales ~linearly with steps (8 steps ≈ 2× the 4-step time) |
-| VRAM | unchanged |
-| turbo LoRA | keep it; it is a distillation LoRA, still helps at higher steps |
-
-Expect RTF to rise above 1.0 on the same hardware. Use when output quality
-matters more than faster-than-realtime generation.
-
-### Higher resolution — 480p class
-
-| Change | Effect |
-|---|---|
-| `source_width/height: ~768×448` | noticeably sharper output |
-| VRAM | rises sharply; 32 GB is tight, may require a lower frame count |
-| wall clock | per-frame cost up; RTF rises |
-| `ref_image_size: "match"` | keep references matched to the source resolution |
-
-### Longer clip — more frames
-
-| Change | Effect |
-|---|---|
-| `num_frames: 226 → 300+` | longer single clip |
-| VRAM | temporal dimension grows; the main VRAM pressure after resolution |
-| wall clock | roughly linear in frames at fixed steps |
-| duration | recompute `duration_seconds = num_frames / native_fps` |
-
-On 32 GB, long clips at high resolution will not both fit; trade one against the
-other.
-
-### Single GPU fallback
-
-| Change | Effect |
-|---|---|
-| 1 worker instead of 3 | same workflow, same receipt contract |
-| wall clock | a 3-clip batch serializes; wall ≈ 3× single-clip time |
-| throughput | ~1/3 of the three-lane fleet |
+This is the only configuration with a controlled multi-run benchmark. The 4-step
+turbo LoRA makes RTF < 1 possible; the pruned int8 UNet makes it fit on a
+consumer card.
 
 ## What actually moves the needle
 
-1. **Steps** is the dominant wall-clock lever at fixed resolution — near-linear.
-2. **Resolution** is the dominant VRAM lever, then **frame count**.
-3. **The turbo LoRA + pruned int8 UNet** are the difference between datacenter
+1. **Resolution** is the dominant wall-clock *and* VRAM lever — super-linear
+   (see the 360p→768p tier gap). This is the single biggest cost knob.
+2. **Steps** scales wall clock near-linearly at fixed resolution.
+3. **Frame count** scales execution near-linearly; RTF degrades only mildly since
+   output duration grows too.
+4. **Input mode** (text / image / reference) is negligible at a given resolution —
+   use references freely for continuity; they do not change sampling cost.
+5. **The turbo LoRA + pruned int8 UNet** are the difference between datacenter
    and consumer-class feasibility. Without them this profile does not hit RTF < 1.
-4. **References** (identity / environment / voice / first / last frame) cost a
-   small upload and conditioning overhead but do not change sampling cost; use
-   them freely for continuity.
 
 ## Production telemetry reference
 
@@ -100,3 +122,11 @@ Same reference profile, 491 production blocks (3 parallel clips, 28.25s out):
 The gap between the p50 (~0.92) and the controlled benchmark (0.733) is
 operational: worker stalls, cold lanes, and upload retries. Steady-state
 hardware capability is the benchmark number; production adds the tail.
+
+## Single GPU fallback
+
+| Change | Effect |
+|---|---|
+| 1 worker instead of 3 | same workflow, same receipt contract |
+| wall clock | a 3-clip batch serializes; wall ≈ 3× single-clip time |
+| throughput | ~1/3 of the three-lane fleet |
