@@ -60,6 +60,36 @@ for 5.167s of output. Conditioning overhead is negligible next to sampling, so
 references are used freely for continuity. Resolution and steps, not input
 mode, are what move the clock.
 
+### Reference-input dimension (360p, 4-step turbo, single GPU)
+
+How the number and kind of reference inputs affect execution time. All rows are
+measured runs with receipts. "Guide" = a first/last-frame image injected via the
+frame-guide node; "chained" = each clip's first frame is the previous clip's
+last frame.
+
+| References | Audio ref | Guide | Frames | Exec time | Provenance |
+|---|---|---|---|---|---|
+| 1 image | 0 | none | 124 | 9.31 s | sample-run workflow + receipt |
+| 1 image | 0 | first-frame (chained) | 124 | 9.35 / 9.46 s | sample-run workflow + receipt |
+| (refs not archived) | — | first + last guide | 226 | 16.87–19.12 s (12 runs) | run-01 sample batches |
+| (refs not archived) | — | none | 226 | 17.64–19.16 s (9 runs) | run-02/03/04 visual sets |
+| (frame-grid prompt) | — | none | 209 | 16.31 / 15.41 s | frame-grid sweep |
+| 2 images | 1 | none | 209 | 30.13 s (submit→complete 32.13 s) | ref2va multi-ref canary |
+
+Reading the dimension:
+
+- **First/last-frame guides are essentially free.** Guided clips land in the
+  same execution band as unguided clips at the same frame count — 9.35–9.46s vs
+  9.31s at 124 frames, and at 226 frames the first+last-guided batches
+  (16.87–19.12s) overlap the unguided visual sets (17.64–19.16s). Use frame
+  guides freely for temporal continuity; they cost nothing measurable.
+- **A second reference image roughly doubles the cost.** At 209 frames, the
+  two-reference-image + one-audio-reference canary runs at ~30s execution versus
+  ~16s for the frame-grid prompt at the same frame count. Each extra reference
+  image is encoded and cross-attended, and unlike the frame guide it is not
+  free. (The frame-grid tier's exact reference composition is not archived, so
+  this comparison is indicative, not a controlled A/B.)
+
 ### Frame-count sweep (608×352, 24fps, 4-step turbo, single GPU)
 
 Two runs per tier; block RTF is the two-worker worst case. Source: production
