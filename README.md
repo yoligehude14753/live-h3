@@ -53,6 +53,61 @@ Wall clock = submission of the batch → terminal receipt of the last clip.
 RTF = wall / output duration. A run counts only if every clip completes with a
 valid H.264/AAC delivery envelope. Full rules in `docs/benchmark.md`.
 
+## Measured results
+
+All numbers below are real measurements from the fleet, median of repeated runs
+where noted. RTF = wall clock / output duration; RTF < 1.0 means faster than
+real-time playback. Resolution is given in megapixels (MP = width×height÷10⁶).
+Tiers never run are marked "not measured" — no number is extrapolated.
+
+### Quality tiers (resolution × steps)
+
+| Tier | Resolution | MP | Steps | Precision | Duration | Wall | RTF | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 360p turbo | 608×352 | 0.21 | 4 | int8 + turbo LoRA | 5.167 s | 10.2 s (1 GPU) | **2.0** single / **0.733** 3-GPU | reference profile |
+| 768p short-drama | 768×1344 | 1.03 | 30 | fl2va | 15.0 s | 1945 s (1 GPU) | ~130 | offline quality tier, 13-shot median |
+| 768p full | 1344×768 | 1.03 | 50 | bf16 (unoptimized) | 5.0 s | 462 s denoise | ~92 | early baseline |
+| 480p (848×480) | — | 0.41 | — | — | — | — | **not measured** | — |
+| 720p (1280×720) | — | 0.92 | — | — | — | — | **not measured** | — |
+| 1080p (1920×1080) | — | 2.07 | — | — | — | — | **not measured** | — |
+
+Only 360p turbo runs faster than real-time, and only when three GPUs render in
+parallel (single-GPU RTF ~2.0). The 768p tiers are offline/batch work. There is
+**no measured 768p 4-step turbo tier** — the turbo LoRA has only been run at
+0.21 MP.
+
+### Duration sweep at the reference profile (608×352, 4-step turbo, 24 FPS)
+
+| Duration | Frames | Single-GPU exec | Single-GPU RTF | 3-GPU block RTF |
+|---|---|---|---|---|
+| 5.2 s | 124 | 8.0–8.9 s | 1.56–1.72 | 0.861 |
+| 5.9 s | 141 | 9.4–10.3 s | 1.60–1.75 | 0.873 |
+| 6.6 s | 158 | 10.8–11.7 s | 1.64–1.77 | 0.886 |
+| 7.3 s | 175 | 12.3–13.2 s | 1.69–1.81 | 0.906 |
+| 8.0 s | 192 | 13.7–14.7 s | 1.71–1.83 | 0.917 |
+| 8.7 s | 209 | 15.4–16.3 s | 1.77–1.87 | 0.936 |
+| 9.4 s | 226 | 16.9–19.2 s | ~1.9 | **0.733** (headline) |
+| 10.1 s | 243 | 18.8–19.7 s | 1.85–1.95 | 0.973 |
+
+Execution grows ~linearly with frames (~0.075 s/frame); the 3-GPU block RTF
+stays under 1.0 across the whole sweep because three lanes render in parallel.
+226 frames / 9.4s is the selected production operating point; 243 frames passes
+with under 3% margin and was rejected.
+
+### Reference-input cost (608×352, 4-step turbo, single GPU)
+
+| References | Audio ref | Frame guide | Frames | Exec |
+|---|---|---|---|---|
+| 1 image | 0 | none | 124 | 9.31 s |
+| 1 image | 0 | first-frame chain | 124 | 9.35–9.46 s |
+| 1 image (character) | 0 | first-frame chain | 226 | 17.8–20.0 s (n=18) |
+| not archived | — | none | 226 | 16.9–19.2 s (n=21) |
+| 2 images | 1 | none | 209 | 30.13 s |
+
+First/last-frame guides are free (guided and unguided runs overlap). A second
+reference image roughly doubles cost (~16s → ~30s at 209 frames). Full detail in
+`docs/parameter-matrix.md`.
+
 ## Production telemetry
 
 Beyond the headline benchmark, the same profile has run continuously in
