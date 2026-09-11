@@ -55,26 +55,9 @@ valid H.264/AAC delivery envelope. Full rules in `docs/benchmark.md`.
 
 ## Measured results
 
-All numbers below are real measurements from the fleet, median of repeated runs
-where noted. RTF = wall clock / output duration; RTF < 1.0 means faster than
-real-time playback. Resolution is given in megapixels (MP = width×height÷10⁶).
-Tiers never run are marked "not measured" — no number is extrapolated.
-
-### Quality tiers (resolution × steps)
-
-| Tier | Resolution | MP | Steps | Precision | Duration | Wall | RTF | Notes |
-|---|---|---|---|---|---|---|---|---|
-| 360p turbo | 608×352 | 0.21 | 4 | int8 + turbo LoRA | 5.167 s | 10.2 s (1 GPU) | **2.0** single / **0.733** 3-GPU | reference profile |
-| 768p short-drama | 768×1344 | 1.03 | 30 | fl2va | 15.0 s | 1945 s (1 GPU) | ~130 | offline quality tier, 13-shot median |
-| 768p full | 1344×768 | 1.03 | 50 | bf16 (unoptimized) | 5.0 s | 462 s denoise | ~92 | early baseline |
-| 480p (848×480) | — | 0.41 | — | — | — | — | **not measured** | — |
-| 720p (1280×720) | — | 0.92 | — | — | — | — | **not measured** | — |
-| 1080p (1920×1080) | — | 2.07 | — | — | — | — | **not measured** | — |
-
-Only 360p turbo runs faster than real-time, and only when three GPUs render in
-parallel (single-GPU RTF ~2.0). The 768p tiers are offline/batch work. There is
-**no measured 768p 4-step turbo tier** — the turbo LoRA has only been run at
-0.21 MP.
+All numbers below are real measurements from the fleet. RTF = wall clock /
+output duration; RTF < 1.0 means faster than real-time playback. Every figure
+comes from a recorded run — nothing is extrapolated.
 
 ### Duration sweep at the reference profile (608×352, 4-step turbo, 24 FPS)
 
