@@ -71,8 +71,8 @@ last frame.
 |---|---|---|---|---|---|
 | 1 image | 0 | none | 124 | 9.31 s | sample-run workflow + receipt |
 | 1 image | 0 | first-frame (chained) | 124 | 9.35 / 9.46 s | sample-run workflow + receipt |
-| (refs not archived) | — | first + last guide | 226 | 16.87–19.12 s (12 runs) | run-01 sample batches |
-| (refs not archived) | — | none | 226 | 17.64–19.16 s (9 runs) | run-02/03/04 visual sets |
+| 1 image (character) | 0 | first-frame (chained) | 226 | 17.78–20.01 s (18 runs) | daily continuity runs, mode "sequential first-frame chained Ref2VA" |
+| (refs not archived) | — | none | 226 | 16.87–19.16 s (21 runs) | run-01..04 speed/visual batches |
 | (frame-grid prompt) | — | none | 209 | 16.31 / 15.41 s | frame-grid sweep |
 | 2 images | 1 | none | 209 | 30.13 s (submit→complete 32.13 s) | ref2va multi-ref canary |
 
@@ -80,9 +80,10 @@ Reading the dimension:
 
 - **First/last-frame guides are essentially free.** Guided clips land in the
   same execution band as unguided clips at the same frame count — 9.35–9.46s vs
-  9.31s at 124 frames, and at 226 frames the first+last-guided batches
-  (16.87–19.12s) overlap the unguided visual sets (17.64–19.16s). Use frame
-  guides freely for temporal continuity; they cost nothing measurable.
+  9.31s at 124 frames, and at 226 frames the chained Ref2VA runs with a
+  first-frame guide (17.78–20.01s) overlap the unguided speed/visual batches
+  (16.87–19.16s). Use frame guides freely for temporal continuity; they cost
+  nothing measurable.
 - **A second reference image roughly doubles the cost.** At 209 frames, the
   two-reference-image + one-audio-reference canary runs at ~30s execution versus
   ~16s for the frame-grid prompt at the same frame count. Each extra reference
